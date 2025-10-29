@@ -6,6 +6,7 @@ import time
 import subprocess
 import platform
 import re
+import pandas as pd   # <— untuk export CSV
 
 DB_NAME = "log.db"
 
@@ -49,11 +50,7 @@ def ping_host(host):
 _time_re = re.compile(r"time[=<]\s*([0-9]*\.?[0-9]+)\s*ms", re.IGNORECASE)
 
 def parse_ping_time(output: str):
-    """
-    Cakup Linux/macOS: 'time=17.2 ms'
-    Windows: 'time<1ms' atau 'time=2ms'
-    Return float millisecond; None jika tak ketemu.
-    """
+    """Linux/macOS: 'time=17.2 ms'; Windows: 'time<1ms' / 'time=2ms'."""
     m = _time_re.search(output)
     if not m:
         return None
@@ -61,9 +58,8 @@ def parse_ping_time(output: str):
         return float(m.group(1))
     except ValueError:
         return None
-    
+
 def insert_log(data):
-    """Insert one row of system info into SQLite."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
@@ -77,21 +73,39 @@ def insert_log(data):
     conn.close()
 
 def show_last_entries(limit=5):
-    """Retrieve and print the last few records from the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Ambil terakhir DESC lalu balik supaya rapi naik
     cursor.execute("SELECT * FROM system_log ORDER BY id DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()[::-1]
     print("\n... Last {} entries:".format(min(limit, len(rows))))
     for row in rows:
         print(row)
-
-    # Bonus: tampilkan total record
     cursor.execute("SELECT COUNT(*) FROM system_log")
     total = cursor.fetchone()[0]
     print(f"\nTotal records in database: {total}")
     conn.close()
+
+
+def show_down_entries():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM system_log WHERE ping_status='DOWN'")
+    rows = cursor.fetchall()
+    print("\n=== Entries with DOWN ping status ===")
+    if not rows:
+        print("No DOWN entries found.")
+    else:
+        for row in rows:
+            print(row)
+    conn.close()
+
+
+def export_to_csv(csv_path="log.csv"):
+    conn = sqlite3.connect(DB_NAME)
+    df = pd.read_sql_query("SELECT * FROM system_log ORDER BY id ASC", conn)
+    df.to_csv(csv_path, index=False)
+    conn.close()
+    print(f"\n✅ Exported {len(df)} rows to {csv_path}")
 
 if __name__ == "__main__":
     init_db()
@@ -101,3 +115,5 @@ if __name__ == "__main__":
         print("Logged:", row)
         time.sleep(10)
     show_last_entries()
+    show_down_entries()  
+    export_to_csv("log.csv")  
